@@ -228,6 +228,28 @@ async function handleChatMessage(message: any) {
         const isCode = response.completion_type === 'code';
         console.log('Sending message to webview:', isCode ? 'codeResponse' : 'chatResponse', response.completion);
 
+        // Detect file creation intent (e.g., response starts with 'Filename: ...')
+        const fileMatch = response.completion.match(/^Filename:\s*(\S+)\s*\n([\s\S]*)/);
+        if (fileMatch) {
+            const filename = fileMatch[1];
+            const fileContent = fileMatch[2].trim();
+            // Ask user to confirm file creation
+            const confirm = await vscode.window.showInformationMessage(
+                `AI wants to create file: ${filename}. Proceed?`,
+                'Create', 'Cancel'
+            );
+            if (confirm === 'Create') {
+                await createFileInWorkspace(filename, fileContent);
+                vscode.window.showInformationMessage(`File '${filename}' created!`);
+            }
+            currentPanel?.webview.postMessage({
+                type: 'chatResponse',
+                content: `File creation: ${filename}\n\n${fileContent}`,
+                loading: false
+            });
+            return;
+        }
+
         if (isCode) {
             currentPanel?.webview.postMessage({
                 type: 'codeResponse',
@@ -243,6 +265,21 @@ async function handleChatMessage(message: any) {
                 loading: false
             });
         }
+// Create a new file in the workspace
+async function createFileInWorkspace(filename: string, content: string) {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0) {
+        vscode.window.showErrorMessage('No workspace folder open.');
+        return;
+    }
+    const folderUri = folders[0].uri;
+    const fileUri = vscode.Uri.joinPath(folderUri, filename);
+    try {
+        await vscode.workspace.fs.writeFile(fileUri, Buffer.from(content, 'utf8'));
+    } catch (e) {
+        vscode.window.showErrorMessage(`Failed to create file: ${e}`);
+    }
+}
 
     } catch (err: any) {
         console.error('Exception in handleChatMessage:', err);

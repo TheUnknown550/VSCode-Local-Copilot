@@ -14,44 +14,43 @@ alert('Webview loaded!');
         messageDiv.className = `message ${type}`;
         
         if (isCode) {
+            // Detect file creation pattern
+            const fileMatch = content.match(/^Filename:\s*(\S+)\s*\n([\s\S]*)/);
             const pre = document.createElement('pre');
             const code = document.createElement('code');
             code.textContent = content;
             pre.appendChild(code);
             messageDiv.appendChild(pre);
-            
-            // Add action buttons for code
-            const actionsDiv = document.createElement('div');
-            actionsDiv.className = 'code-actions';
-            
-            const insertBtn = document.createElement('button');
-            insertBtn.textContent = 'Insert at Cursor';
-            insertBtn.onclick = () => {
-                vscode.postMessage({
-                    type: 'insertCode',
-                    code: content
-                });
-            };
-            
-            const replaceBtn = document.createElement('button');
-            replaceBtn.textContent = 'Replace Selection';
-            replaceBtn.onclick = () => {
-                vscode.postMessage({
-                    type: 'replaceCode',
-                    code: content
-                });
-            };
-            
-            const copyBtn = document.createElement('button');
-            copyBtn.textContent = 'Copy';
-            copyBtn.onclick = () => {
-                navigator.clipboard.writeText(content);
-            };
-            
-            actionsDiv.appendChild(insertBtn);
-            actionsDiv.appendChild(replaceBtn);
-            actionsDiv.appendChild(copyBtn);
-            messageDiv.appendChild(actionsDiv);
+            if (!fileMatch) {
+                // Add action buttons for code (not for file creation)
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'code-actions';
+                const insertBtn = document.createElement('button');
+                insertBtn.textContent = 'Insert at Cursor';
+                insertBtn.onclick = () => {
+                    vscode.postMessage({
+                        type: 'insertCode',
+                        code: content
+                    });
+                };
+                const replaceBtn = document.createElement('button');
+                replaceBtn.textContent = 'Replace Selection';
+                replaceBtn.onclick = () => {
+                    vscode.postMessage({
+                        type: 'replaceCode',
+                        code: content
+                    });
+                };
+                const copyBtn = document.createElement('button');
+                copyBtn.textContent = 'Copy';
+                copyBtn.onclick = () => {
+                    navigator.clipboard.writeText(content);
+                };
+                actionsDiv.appendChild(insertBtn);
+                actionsDiv.appendChild(replaceBtn);
+                actionsDiv.appendChild(copyBtn);
+                messageDiv.appendChild(actionsDiv);
+            }
         } else {
             // Format text with markdown-like support
             const formattedContent = formatText(content);
