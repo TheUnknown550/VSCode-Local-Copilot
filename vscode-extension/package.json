@@ -1,0 +1,86 @@
+{
+  "name": "vscode-local-copilot",
+  "displayName": "Local AI Copilot",
+  "description": "AI-powered coding assistant using local Ollama models",
+  "publisher": "your-name",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.76.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Programming Languages",
+    "Snippets"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ai.chat",
+        "title": "Open Chat Panel",
+        "category": "Local AI Copilot"
+      },
+      {
+        "command": "ai.editCode",
+        "title": "Edit Selected Code",
+        "category": "Local AI Copilot"
+      },
+      {
+        "command": "ai.generateCode",
+        "title": "Generate Code",
+        "category": "Local AI Copilot"
+      },
+      {
+        "command": "ai.explainCode",
+        "title": "Explain Code",
+        "category": "Local AI Copilot"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "ai.editCode",
+          "when": "editorHasSelection",
+          "group": "1_modification"
+        },
+        {
+          "command": "ai.explainCode",
+          "when": "editorHasSelection",
+          "group": "1_modification"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "ai.chat",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l"
+      },
+      {
+        "command": "ai.generateCode",
+        "key": "ctrl+shift+g",
+        "mac": "cmd+shift+g"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.4.2",
+    "@types/node-fetch": "^2.6.13",
+    "@types/vscode": "^1.79.0",
+    "@vscode/test-electron": "^2.5.0",
+    "typescript": "^5.1.6"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}

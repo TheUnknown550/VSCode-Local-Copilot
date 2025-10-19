@@ -1,0 +1,378 @@
+import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
+import fetch from 'node-fetch';
+
+interface CompletionResponse {
+    completion: string;
+    completion_type: 'code' | 'chat';
+    raw_completion?: string;
+    error?: string;
+}
+
+let currentPanel: vscode.WebviewPanel | undefined = undefined;
+const SERVER_URL = 'http://127.0.0.1:5000';
+
+export function activate(context: vscode.ExtensionContext) {
+    
+    // Command to open chat panel
+    let chatCommand = vscode.commands.registerCommand('ai.chat', () => {
+        openChatPanel(context);
+    });
+
+    // Command to edit selected code
+    let editCommand = vscode.commands.registerCommand('ai.editCode', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showWarningMessage('No active editor');
+            return;
+        }
+
+        const selection = editor.selection;
+        const selectedText = editor.document.getText(selection);
+
+        if (!selectedText) {
+            vscode.window.showWarningMessage('Please select code to edit');
+            return;
+        }
+
+        const instruction = await vscode.window.showInputBox({
+            prompt: 'What would you like to do with this code?',
+            placeHolder: 'e.g., Add error handling, Optimize this function, Add comments'
+        });
+
+        if (!instruction) return;
+
+        await editCodeWithAI(editor, selection, selectedText, instruction);
+    });
+
+    // Command to generate code
+    let generateCommand = vscode.commands.registerCommand('ai.generateCode', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showWarningMessage('No active editor');
+            return;
+        }
+
+        const prompt = await vscode.window.showInputBox({
+            prompt: 'Describe the code you want to generate',
+            placeHolder: 'e.g., Create a function to sort an array'
+        });
+
+        if (!prompt) return;
+
+        await generateCodeWithAI(editor, prompt);
+    });
+
+    // Command to explain code
+    let explainCommand = vscode.commands.registerCommand('ai.explainCode', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showWarningMessage('No active editor');
+            return;
+        }
+
+        const selection = editor.selection;
+        const selectedText = editor.document.getText(selection);
+
+        if (!selectedText) {
+            vscode.window.showWarningMessage('Please select code to explain');
+            return;
+        }
+
+        openChatPanel(context);
+        if (currentPanel) {
+            currentPanel.webview.postMessage({
+                type: 'aiResponse',
+                content: 'Analyzing code...',
+                isCode: false
+            });
+
+            const response = await callAI(
+                `Explain this code in detail:\n\n${selectedText}`,
+                'chat',
+                ''
+            );
+
+            currentPanel.webview.postMessage({
+                type: 'aiResponse',
+                content: response.completion,
+                isCode: false
+            });
+        }
+    });
+
+    context.subscriptions.push(chatCommand, editCommand, generateCommand, explainCommand);
+}
+
+function openChatPanel(context: vscode.ExtensionContext) {
+    if (currentPanel) {
+        currentPanel.reveal(vscode.ViewColumn.Beside);
+        return;
+    }
+
+    currentPanel = vscode.window.createWebviewPanel(
+        'localAIChat',
+        'Local AI Copilot',
+        vscode.ViewColumn.Beside,
+        {
+            enableScripts: true,
+            localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'src'))],
+            retainContextWhenHidden: true
+        }
+    );
+
+    const htmlPath = path.join(context.extensionPath, 'src', 'webview.html');
+    let html = fs.readFileSync(htmlPath, 'utf8');
+    
+    const scriptUri = currentPanel.webview.asWebviewUri(
+        vscode.Uri.file(path.join(context.extensionPath, 'src', 'webview.js'))
+    );
+    
+    html = html.replace(
+        /<script src="webview.js"><\/script>/,
+        `<script src="${scriptUri}"></script>`
+    );
+
+    currentPanel.webview.html = html;
+
+    currentPanel.webview.onDidReceiveMessage(async (message) => {
+        if (message.type === 'sendPrompt') {
+            await handleChatMessage(message);
+        } else if (message.type === 'insertCode') {
+            insertCodeInEditor(message.code);
+        } else if (message.type === 'applyEdit') {
+            await applyCodeEdit(message.code);
+        }
+    });
+
+    currentPanel.onDidDispose(() => {
+        currentPanel = undefined;
+    });
+
+    // Check server health
+    checkServerHealth();
+}
+
+async function handleChatMessage(message: any) {
+    const editor = vscode.window.activeTextEditor;
+    
+    // Show loading state
+    currentPanel?.webview.postMessage({
+        type: 'aiResponse',
+        content: 'Thinking...',
+        isCode: false,
+        loading: true
+    });
+
+    try {
+        let context = '';
+        let taskType = 'chat';
+
+        // Get context from active editor if available
+        if (editor) {
+            const selection = editor.selection;
+            const selectedText = editor.document.getText(selection);
+            
+            if (selectedText) {
+                context = selectedText;
+                taskType = 'code';
+            } else {
+                // Get surrounding context
+                const document = editor.document;
+                const cursorPosition = editor.selection.active;
+                const startLine = Math.max(0, cursorPosition.line - 10);
+                const endLine = Math.min(document.lineCount - 1, cursorPosition.line + 10);
+                const range = new vscode.Range(startLine, 0, endLine, document.lineAt(endLine).text.length);
+                context = document.getText(range);
+            }
+        }
+
+        const response = await callAI(message.prompt, taskType, context, message.model);
+
+        if (response.error) {
+            currentPanel?.webview.postMessage({
+                type: 'error',
+                content: response.error
+            });
+            vscode.window.showErrorMessage(response.error);
+            return;
+        }
+
+        const isCode = response.completion_type === 'code';
+
+        currentPanel?.webview.postMessage({
+            type: 'aiResponse',
+            content: response.completion,
+            rawContent: response.raw_completion,
+            isCode: isCode,
+            loading: false
+        });
+
+    } catch (err: any) {
+        currentPanel?.webview.postMessage({
+            type: 'error',
+            content: `Error: ${err.message}`
+        });
+        vscode.window.showErrorMessage(`AI request failed: ${err.message}`);
+    }
+}
+
+async function callAI(
+    prompt: string, 
+    taskType: string = 'chat', 
+    context: string = '',
+    model: string = 'gemma3:4b'
+): Promise<CompletionResponse> {
+    const response = await fetch(`${SERVER_URL}/completion`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+            prompt, 
+            model, 
+            context,
+            task_type: taskType
+        })
+    });
+
+    if (!response.ok) {
+        throw new Error(`Server responded with ${response.status}`);
+    }
+
+    return await response.json() as CompletionResponse;
+}
+
+function insertCodeInEditor(code: string) {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+        vscode.window.showWarningMessage('No active editor');
+        return;
+    }
+
+    editor.edit((editBuilder) => {
+        editBuilder.insert(editor.selection.active, code);
+    });
+}
+
+async function applyCodeEdit(code: string) {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+        vscode.window.showWarningMessage('No active editor');
+        return;
+    }
+
+    const selection = editor.selection;
+    
+    // Show diff first
+    const originalDocument = editor.document;
+    const originalText = originalDocument.getText(selection);
+
+    // Create a temporary document for comparison
+    const newDoc = await vscode.workspace.openTextDocument({
+        content: code,
+        language: originalDocument.languageId
+    });
+
+    // Show diff
+    await vscode.commands.executeCommand(
+        'vscode.diff',
+        originalDocument.uri,
+        newDoc.uri,
+        'Original ← → AI Suggestion'
+    );
+
+    // Ask user to apply
+    const apply = await vscode.window.showInformationMessage(
+        'Apply AI suggestion?',
+        'Apply',
+        'Cancel'
+    );
+
+    if (apply === 'Apply') {
+        editor.edit((editBuilder) => {
+            editBuilder.replace(selection, code);
+        });
+        vscode.window.showInformationMessage('Code applied!');
+    }
+}
+
+async function editCodeWithAI(
+    editor: vscode.TextEditor,
+    selection: vscode.Selection,
+    selectedText: string,
+    instruction: string
+) {
+    vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: "AI is editing your code...",
+        cancellable: false
+    }, async (progress) => {
+        try {
+            const response = await callAI(instruction, 'edit', selectedText);
+            
+            if (response.error) {
+                vscode.window.showErrorMessage(response.error);
+                return;
+            }
+
+            await applyCodeEdit(response.completion);
+
+        } catch (err: any) {
+            vscode.window.showErrorMessage(`Failed to edit code: ${err.message}`);
+        }
+    });
+}
+
+async function generateCodeWithAI(editor: vscode.TextEditor, prompt: string) {
+    vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: "AI is generating code...",
+        cancellable: false
+    }, async (progress) => {
+        try {
+            const document = editor.document;
+            const cursorPosition = editor.selection.active;
+            
+            // Get context around cursor
+            const startLine = Math.max(0, cursorPosition.line - 20);
+            const endLine = Math.min(document.lineCount - 1, cursorPosition.line + 5);
+            const range = new vscode.Range(startLine, 0, endLine, document.lineAt(endLine).text.length);
+            const context = document.getText(range);
+
+            const response = await callAI(prompt, 'code', context);
+            
+            if (response.error) {
+                vscode.window.showErrorMessage(response.error);
+                return;
+            }
+
+            editor.edit((editBuilder) => {
+                editBuilder.insert(editor.selection.active, '\n' + response.completion + '\n');
+            });
+
+            vscode.window.showInformationMessage('Code generated!');
+
+        } catch (err: any) {
+            vscode.window.showErrorMessage(`Failed to generate code: ${err.message}`);
+        }
+    });
+}
+
+async function checkServerHealth() {
+    try {
+        const response = await fetch(`${SERVER_URL}/health`);
+        if (response.ok) {
+            vscode.window.showInformationMessage('Local AI Copilot server is running!');
+        }
+    } catch (err) {
+        vscode.window.showWarningMessage(
+            'Could not connect to Local AI Copilot server. Make sure the server is running on port 5000.'
+        );
+    }
+}
+
+export function deactivate() {
+    if (currentPanel) {
+        currentPanel.dispose();
+    }
+}
