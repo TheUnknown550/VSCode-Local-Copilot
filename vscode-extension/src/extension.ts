@@ -169,7 +169,25 @@ async function handleChatMessage(message: any) {
         let context = '';
         let taskType = 'chat';
 
-        // Smart context gathering
+        // Project-wide smart context gathering
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        let projectContext = '';
+        if (workspaceFolders && workspaceFolders.length > 0) {
+            const folder = workspaceFolders[0].uri.fsPath;
+            // Gather up to 5 key files (README, setup, main, server, extension, etc.)
+            const keyFiles = fs.readdirSync(folder)
+                .filter(f => /README|SETUP|main|server|extension|\.py$|\.ts$|\.js$|\.md$/i.test(f))
+                .slice(0, 5);
+            for (const file of keyFiles) {
+                try {
+                    const filePath = path.join(folder, file);
+                    const fileContent = fs.readFileSync(filePath, 'utf8');
+                    projectContext += `\n\n--- File: ${file} ---\n` + fileContent.slice(0, 2000); // Limit size per file
+                } catch (e) { /* skip unreadable files */ }
+            }
+        }
+
+        // Smart context from current editor
         if (editor) {
             const selection = editor.selection;
             const selectedText = editor.document.getText(selection);
@@ -187,6 +205,11 @@ async function handleChatMessage(message: any) {
             } else {
                 context = surroundingContext;
             }
+        }
+
+        // Combine project context and editor context
+        if (projectContext) {
+            context = (context ? context : '') + '\n\n--- Project Context ---\n' + projectContext;
         }
 
         const response = await callAI(message.prompt, taskType, context, message.model);

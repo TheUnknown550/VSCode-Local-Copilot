@@ -1,6 +1,9 @@
 # Local AI Copilot for VS Code
 
+
 A VS Code extension that provides GitHub Copilot-like functionality using locally running Ollama models.
+
+Now with **smart project-wide context**: The extension automatically gathers code and documentation from your workspace for every AI request, making suggestions and edits much more intelligent and Copilot-like.
 
 ## Features
 
@@ -11,6 +14,10 @@ A VS Code extension that provides GitHub Copilot-like functionality using locall
 - 🔄 **Diff Preview** - See before/after comparisons before applying changes
 - 🎨 **Beautiful UI** - Modern interface that matches VS Code's theme
 - 🚀 **Multiple Models** - Choose between different Ollama models
+
+- 🧠 **Project-Wide Context Awareness** – AI suggestions and edits use key files from your workspace (README, SETUP, main, server, extension, `.py`, `.ts`, `.js`, `.md`).
+- 🔍 **Intelligent Suggestions & Edits** – AI can reason about your whole project, not just the current file or cursor.
+- 🛠️ **Smart Code Actions** – Insert, replace, and preview code with context-aware suggestions and diff previews.
 
 ## Prerequisites
 
@@ -59,6 +66,14 @@ Then press `F5` to launch the extension in a new VS Code window.
 
 ### Chat Interface
 
+## Smart Project Context
+
+- The extension automatically gathers context from up to 5 key files in your workspace (README, SETUP, main, server, extension, `.py`, `.ts`, `.js`, `.md`) for every AI request.
+- It combines this with the current editor's context and selection.
+- The AI will now be able to reason about your whole project, not just the current file or cursor.
+
+This makes code suggestions, edits, and completions much smarter and more Copilot-like!
+
 1. Open Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P`)
 2. Type "Local AI Copilot: Chat"
 3. Start chatting with your AI!
@@ -88,6 +103,13 @@ Choose your preferred model from the dropdown in the chat panel:
 1. **VS Code Extension**: Provides the UI and integrates with VS Code
 2. **Python Server**: Handles communication with Ollama
 3. **Ollama**: Runs the AI models locally on your machine
+
+**Advanced:**
+
+When you ask for code generation, editing, or explanation, the extension:
+1. Collects relevant code and documentation from your workspace.
+2. Combines it with your current selection or file context.
+3. Sends this rich context to the AI backend for smarter, project-aware results.
 
 ```
 VS Code Extension (TypeScript)
