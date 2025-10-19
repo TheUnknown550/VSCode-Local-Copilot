@@ -156,7 +156,7 @@ function openChatPanel(context: vscode.ExtensionContext) {
 
 async function handleChatMessage(message: any) {
     const editor = vscode.window.activeTextEditor;
-    
+
     // Show loading state
     currentPanel?.webview.postMessage({
         type: 'aiResponse',
@@ -169,28 +169,31 @@ async function handleChatMessage(message: any) {
         let context = '';
         let taskType = 'chat';
 
-        // Get context from active editor if available
+        // Smart context gathering
         if (editor) {
             const selection = editor.selection;
             const selectedText = editor.document.getText(selection);
-            
+            const document = editor.document;
+            const cursorPosition = editor.selection.active;
+            // Get up to 40 lines before and after cursor for context
+            const startLine = Math.max(0, cursorPosition.line - 40);
+            const endLine = Math.min(document.lineCount - 1, cursorPosition.line + 40);
+            const range = new vscode.Range(startLine, 0, endLine, document.lineAt(endLine).text.length);
+            const surroundingContext = document.getText(range);
+
             if (selectedText) {
-                context = selectedText;
+                context = selectedText + '\n\n--- Surrounding Context ---\n' + surroundingContext;
                 taskType = 'code';
             } else {
-                // Get surrounding context
-                const document = editor.document;
-                const cursorPosition = editor.selection.active;
-                const startLine = Math.max(0, cursorPosition.line - 10);
-                const endLine = Math.min(document.lineCount - 1, cursorPosition.line + 10);
-                const range = new vscode.Range(startLine, 0, endLine, document.lineAt(endLine).text.length);
-                context = document.getText(range);
+                context = surroundingContext;
             }
         }
 
         const response = await callAI(message.prompt, taskType, context, message.model);
+        console.log('AI response from server:', response);
 
         if (response.error) {
+            console.error('AI error response:', response.error);
             currentPanel?.webview.postMessage({
                 type: 'error',
                 content: response.error
@@ -200,16 +203,26 @@ async function handleChatMessage(message: any) {
         }
 
         const isCode = response.completion_type === 'code';
+        console.log('Sending message to webview:', isCode ? 'codeResponse' : 'chatResponse', response.completion);
 
-        currentPanel?.webview.postMessage({
-            type: 'aiResponse',
-            content: response.completion,
-            rawContent: response.raw_completion,
-            isCode: isCode,
-            loading: false
-        });
+        if (isCode) {
+            currentPanel?.webview.postMessage({
+                type: 'codeResponse',
+                code: response.completion,
+                rawContent: response.raw_completion,
+                explanation: 'Preview and insert, replace, or diff with selection.',
+                loading: false
+            });
+        } else {
+            currentPanel?.webview.postMessage({
+                type: 'chatResponse',
+                content: response.completion,
+                loading: false
+            });
+        }
 
     } catch (err: any) {
+        console.error('Exception in handleChatMessage:', err);
         currentPanel?.webview.postMessage({
             type: 'error',
             content: `Error: ${err.message}`
@@ -249,8 +262,14 @@ function insertCodeInEditor(code: string) {
         return;
     }
 
+    // Smart insertion: insert code at cursor, auto-indent
     editor.edit((editBuilder) => {
-        editBuilder.insert(editor.selection.active, code);
+        const position = editor.selection.active;
+        // Indent code to match current line
+        const currentLine = editor.document.lineAt(position.line);
+        const indent = currentLine.text.match(/^\s*/)?.[0] || '';
+        const indentedCode = code.split('\n').map((line, i) => i === 0 ? line : indent + line).join('\n');
+        editBuilder.insert(position, indentedCode);
     });
 }
 
@@ -263,7 +282,7 @@ async function applyCodeEdit(code: string) {
 
     const selection = editor.selection;
     
-    // Show diff first
+    // Show diff preview before applying edit
     const originalDocument = editor.document;
     const originalText = originalDocument.getText(selection);
 
@@ -278,7 +297,8 @@ async function applyCodeEdit(code: string) {
         'vscode.diff',
         originalDocument.uri,
         newDoc.uri,
-        'Original ← → AI Suggestion'
+        'Original ← → AI Suggestion',
+        { preview: true }
     );
 
     // Ask user to apply

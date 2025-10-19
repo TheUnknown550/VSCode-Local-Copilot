@@ -1,3 +1,4 @@
+alert('Webview loaded!');
 (function() {
     const vscode = acquireVsCodeApi();
 
@@ -133,7 +134,8 @@
     // Listen for messages from the extension
     window.addEventListener('message', event => {
         const message = event.data;
-        
+        console.log('Received message from extension:', message);
+
         removeLoadingMessage();
         isProcessing = false;
         sendButton.disabled = false;
@@ -148,6 +150,10 @@
                 if (message.explanation) {
                     addMessage(message.explanation, 'ai', false);
                 }
+                break;
+            
+            case 'aiResponse':
+                addMessage(message.content, 'ai', message.isCode);
                 break;
             
             case 'error':

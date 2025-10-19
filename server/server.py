@@ -9,7 +9,7 @@ CORS(app)
 
 MODELS = {
     "gemma3-4b": "gemma3:4b",
-    "gemma3-8b": "gemma3:8b",
+    "gemma3-12b": "gemma3:12b",
     "deepseek-r1-8b": "deepseek-r1:8b"
 }
 
@@ -51,10 +51,21 @@ def completion():
         prompt = data.get("prompt", "")
         context = data.get("context", "")
         task_type = data.get("task_type", "chat")  # 'chat', 'code', 'edit'
-        
-        if model not in MODELS:
-            return jsonify({"error": f"Model {model} not available"}), 400
-        
+
+        # Accept both "gemma3:4b" and "gemma3-4b" formats
+        model_key = model.replace(":", "-")
+        if model_key not in MODELS and model not in MODELS.values():
+            print(f"Model not found: {model}")
+            return jsonify({"error": f"Model {model} not available. Valid models: {list(MODELS.keys()) + list(MODELS.values())}"}), 400
+
+        # Use Ollama model name
+        ollama_model = MODELS.get(model_key, model)
+
+        # Validate prompt
+        if not prompt:
+            print("Missing prompt in request.")
+            return jsonify({"error": "Missing prompt in request."}), 400
+
         # Build the prompt based on task type
         if task_type == "code":
             system_prompt = "You are a coding assistant. Provide only code without explanations unless asked. Format code properly."
@@ -69,7 +80,7 @@ def completion():
         response = requests.post(
             OLLAMA_API_URL,
             json={
-                "model": MODELS[model],
+                "model": ollama_model,
                 "prompt": full_prompt,
                 "stream": False
             },
@@ -80,11 +91,19 @@ def completion():
             return jsonify({"error": f"Ollama API error: {response.text}"}), 500
         
         result = response.json()
+        print("Ollama API response:", result)
         completion_text = result.get("response", "").strip()
-        
+
+        if not completion_text:
+            print("Ollama returned an empty response.")
+            return jsonify({
+                "error": "Ollama returned an empty response. Check if the model is running and prompt is valid.",
+                "ollama_response": result
+            }), 500
+
         # Determine if this is code or chat
         is_code = detect_code_blocks(completion_text) or task_type in ["code", "edit"]
-        
+
         # Extract code if it's in markdown format
         if is_code and '```' in completion_text:
             code_content = extract_code_from_markdown(completion_text)
@@ -93,7 +112,7 @@ def completion():
                 "raw_completion": completion_text,
                 "completion_type": "code"
             })
-        
+
         return jsonify({
             "completion": completion_text,
             "completion_type": "code" if is_code else "chat"
